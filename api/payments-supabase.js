@@ -3,6 +3,8 @@ import Busboy from 'busboy';
 import jwt from 'jsonwebtoken';
 
 export const config = { api: { bodyParser: false } };
+// Pastikan menggunakan Node runtime (Busboy butuh Node APIs)
+export const runtime = 'nodejs';
 
 function parseMultipart(req) {
   return new Promise((resolve, reject) => {
