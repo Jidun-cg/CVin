@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+/dist/
+
+# Local env secrets (keep only example committed)
+.env
+.env.*
+!.env.example
+
+# Vercel / deployment metadata
+.vercel/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# Coverage & test artifacts
+coverage/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+
+# IDE folders
+.idea/
+
+# VSCode settings (allow shared examples)
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+
+# Temporary archives
+*.zip
+
+# Optional lockfiles (keep one you use; here we keep package-lock.json so don't ignore it)
+# yarn.lock
+# pnpm-lock.yaml
+
+# Local caches
+*.local
