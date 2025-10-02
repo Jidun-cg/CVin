@@ -5,7 +5,8 @@ import Busboy from 'busboy';
 export const config = { api: { bodyParser: false } };
 export const runtime = 'nodejs';
 
-const BUCKET = process.env.SUPABASE_BUCKET || 'payments';
+const BUCKET_ENV = process.env.SUPABASE_BUCKET;
+const BUCKET_CANDIDATES = [BUCKET_ENV, 'payments', 'payment-proofs'].filter(Boolean);
 const TABLE = 'user_payments';
 
 function parseMultipart(req) {
@@ -67,17 +68,30 @@ export default async function handler(req, res) {
       const { fields, file } = await parseMultipart(req);
       if (!file) return respond(res, 400, { error: 'proof required', stage: 'no-file' });
       if (file.buffer.length > 4 * 1024 * 1024) return respond(res, 400, { error: 'File too large (>4MB)', stage: 'size' });
-      // Check bucket exists quickly; if not, just return clear error (buat manual agar terkontrol)
-      const { error: bucketErr } = await supabase.storage.from(BUCKET).list('', { limit: 1 });
-      if (bucketErr) return respond(res, 500, { error: 'Bucket missing or inaccessible', stage: 'bucket', detail: bucketErr.message, bucket: BUCKET });
+      let selectedBucket = null;
+      let lastErr = null;
+      for (const candidate of BUCKET_CANDIDATES) {
+        const { error: bErr } = await supabase.storage.from(candidate).list('', { limit: 1 });
+        if (!bErr) { selectedBucket = candidate; break; }
+        lastErr = bErr;
+      }
+      if (!selectedBucket) {
+        // Coba buat bucket pertama kandidat
+        const target = BUCKET_CANDIDATES[0];
+        const { error: createErr } = await supabase.storage.createBucket(target, { public: true });
+        if (createErr) {
+          return respond(res, 500, { error: 'All buckets missing & create failed', stage: 'bucket', detail: createErr.message, tried: BUCKET_CANDIDATES });
+        }
+        selectedBucket = target;
+      }
       const filename = `${user.id}-${Date.now()}-${file.filename.replace(/\s+/g,'_')}`;
-      const { error: upErr } = await supabase.storage.from(BUCKET).upload(filename, file.buffer, { contentType: file.mimeType || 'application/octet-stream' });
-      if (upErr) return respond(res, 500, { error: upErr.message, stage: 'upload', bucket: BUCKET });
-      const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(filename);
+      const { error: upErr } = await supabase.storage.from(selectedBucket).upload(filename, file.buffer, { contentType: file.mimeType || 'application/octet-stream' });
+      if (upErr) return respond(res, 500, { error: upErr.message, stage: 'upload', bucket: selectedBucket });
+      const { data: pub } = supabase.storage.from(selectedBucket).getPublicUrl(filename);
       const insertPayload = { user_id: user.id, payment_image: pub.publicUrl, amount: fields.amount ? Number(fields.amount) : 0, method: fields.method || 'dana', status: 'pending' };
       const { data, error } = await supabase.from(TABLE).insert(insertPayload).select().single();
       if (error) return respond(res, 500, { error: error.message, stage: 'insert' });
-      return respond(res, 200, { payment: data });
+      return respond(res, 200, { payment: { ...data, bucket: selectedBucket } });
     } catch (e) {
       console.error('[payments-supabase] POST exception', e);
       if (e.message === 'FILE_TOO_LARGE') return respond(res, 400, { error: 'File too large (>4MB)', stage: 'size' });
