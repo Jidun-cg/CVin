@@ -59,7 +59,24 @@ export default async function handler(req, res) {
       // Optional: check bucket existence by attempting list (will not throw but may return error)
       try {
         const { error: bucketErr } = await supabase.storage.from(bucket).list('', { limit: 1 });
-        if (bucketErr) console.error('[payments-supabase] Bucket check error:', bucketErr.message);
+        if (bucketErr) {
+          console.error('[payments-supabase] Bucket check error:', bucketErr.message);
+          if (bucketErr.message?.toLowerCase().includes('not found')) {
+            // attempt to create bucket (public)
+            try {
+              const { error: createErr } = await supabase.storage.createBucket(bucket, { public: true });
+              if (createErr) {
+                console.error('[payments-supabase] Bucket create failed:', createErr.message);
+                return respond(res, 500, { error: 'Bucket not found and failed to create', stage: 'bucket-create' });
+              } else {
+                console.log('[payments-supabase] Bucket created:', bucket);
+              }
+            } catch (ce) {
+              console.error('[payments-supabase] Bucket create exception:', ce);
+              return respond(res, 500, { error: 'Bucket not found (create exception)', stage: 'bucket-create-ex' });
+            }
+          }
+        }
       } catch (e) {
         console.error('[payments-supabase] Bucket list exception:', e);
       }
