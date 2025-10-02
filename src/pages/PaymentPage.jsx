@@ -50,20 +50,7 @@ export default function PaymentPage() {
           </form>
         )}
         {msg && <div className="mt-4 text-sm text-primary">{msg}</div>}
-        {mode==='remote' && payments?.length > 0 && (
-          <div className="mt-8 border-t pt-4">
-            <h2 className="text-sm font-semibold mb-2">Debug: Payments (remote)</h2>
-            <ul className="space-y-2 max-h-64 overflow-y-auto text-xs">
-              {payments.slice(0,10).map(p => (
-                <li key={p.id} className="border p-2 rounded">
-                  <div>ID: {p.id}</div>
-                  <div>Status: {p.status}</div>
-                  {(p.proof_url || p.proofUrl || p.payment_image) && <a href={p.proof_url || p.proofUrl || p.payment_image} target="_blank" rel="noreferrer" className="text-blue-600 underline">Lihat bukti</a>}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {/* Debug list removed for production cleanliness */}
       </Card>
     </div>
   );
