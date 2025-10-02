@@ -54,15 +54,33 @@ export default async function handler(req, res) {
       const file = files.proof;
       if (!file) return respond(res, 400, { error: 'proof required' });
       const bucket = process.env.SUPABASE_BUCKET || 'payment-proofs';
+      // Optional: check bucket existence by attempting list (will not throw but may return error)
+      try {
+        const { error: bucketErr } = await supabase.storage.from(bucket).list('', { limit: 1 });
+        if (bucketErr) console.error('[payments-supabase] Bucket check error:', bucketErr.message);
+      } catch (e) {
+        console.error('[payments-supabase] Bucket list exception:', e);
+      }
       const filename = `${user.id}-${Date.now()}-${file.filename}`;
+      console.log('[payments-supabase] Upload start', { userId: user.id, filename, size: file.buffer.length, mime: file.mimeType, bucket });
       const { error: upErr } = await supabase.storage.from(bucket).upload(filename, file.buffer, { contentType: file.mimeType });
-      if (upErr) return respond(res, 500, { error: upErr.message });
+      if (upErr) {
+        console.error('[payments-supabase] Upload error:', upErr.message);
+        return respond(res, 500, { error: upErr.message, stage: 'upload' });
+      }
       const { data: pub } = supabase.storage.from(bucket).getPublicUrl(filename);
-      const { data, error } = await supabase.from('payments').insert({ user_id: user.id, amount: fields.amount ? Number(fields.amount) : 0, method: fields.method || 'dana', proof_url: pub.publicUrl }).select().single();
-      if (error) return respond(res, 500, { error: error.message });
+      const insertPayload = { user_id: user.id, amount: fields.amount ? Number(fields.amount) : 0, method: fields.method || 'dana', proof_url: pub.publicUrl };
+      console.log('[payments-supabase] Insert payload', insertPayload);
+      const { data, error } = await supabase.from('payments').insert(insertPayload).select().single();
+      if (error) {
+        console.error('[payments-supabase] Insert error:', error.message);
+        return respond(res, 500, { error: error.message, stage: 'insert' });
+      }
+      console.log('[payments-supabase] Success payment id', data.id);
       return respond(res, 200, { payment: data });
     } catch (e) {
-      return respond(res, 500, { error: 'Upload failed' });
+      console.error('[payments-supabase] Unexpected exception', e);
+      return respond(res, 500, { error: 'Upload failed', stage: 'exception' });
     }
   }
 
