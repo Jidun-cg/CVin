@@ -17,6 +17,23 @@ export function AuthProvider({ children }) {
   const [remoteResumes, setRemoteResumes] = useState(null);
   const [mode, setMode] = useState('local'); // 'local' | 'remote'
 
+  // Helper to refresh remote lists (payments & resumes)
+  const refreshRemoteData = async (opts = { payments: true, resumes: true }) => {
+    if (mode !== 'remote' || !user) return;
+    try {
+      if (opts.payments) {
+        const list = await paymentsApi.list();
+        setRemotePayments(list.payments || []);
+      }
+    } catch (e) { /* silent */ }
+    try {
+      if (opts.resumes) {
+        const listR = await resumesApi.list();
+        setRemoteResumes(listR.resumes || []);
+      }
+    } catch (e) { /* silent */ }
+  };
+
   useEffect(() => {
     // Detect remote mode if token present in storage
     const token = loadJSON('cvin_token', null);
@@ -41,8 +58,8 @@ export function AuthProvider({ children }) {
           if (found) setUser(found);
         }
       } else {
-        // remote fetch payments & resumes lazily on demand
-        // (leave empty here to reduce initial load)
+        // fetch initial resumes list so user sees existing data
+        await refreshRemoteData({ payments: true, resumes: true });
       }
     })();
   }, [mode]);
@@ -57,6 +74,7 @@ export function AuthProvider({ children }) {
       const { token, user: remoteUser } = await authApi.signup(email, password);
       setAuthToken(token); saveJSON('cvin_token', token);
       setUser(remoteUser); setMode('remote');
+        await refreshRemoteData();
       return;
     } catch (e) {
       // console.warn('Remote signup failed, fallback to local', e);
@@ -73,6 +91,7 @@ export function AuthProvider({ children }) {
       const { token, user: remoteUser } = await authApi.login(email, password);
       setAuthToken(token); saveJSON('cvin_token', token);
       setUser(remoteUser); setMode('remote');
+      await refreshRemoteData();
       return;
     } catch (e) {
       // ignore and fallback
@@ -89,7 +108,13 @@ export function AuthProvider({ children }) {
     if (mode === 'remote') {
       // expects File object
       if (proofFileOrDataUrl instanceof File) {
-        try { await paymentsApi.upload(proofFileOrDataUrl); } catch (e) { console.error(e); }
+        try {
+          const { payment } = await paymentsApi.upload(proofFileOrDataUrl);
+          // Update list immediately
+          setRemotePayments(prev => [payment, ...(prev||[])]);
+          // ensure we have fresh list (in case server side transforms)
+          setTimeout(()=>{ refreshRemoteData({ payments: true, resumes: false }); }, 250);
+        } catch (e) { console.error(e); }
       }
     } else {
       const payment = { id: genId('pay'), userId: user.id, status: 'pending', proof: proofFileOrDataUrl, createdAt: Date.now(), method: 'dana' };
@@ -127,14 +152,10 @@ export function AuthProvider({ children }) {
     if (!user) return;
     if (!existingId && !canCreateCV()) throw new Error('Limit CV untuk akun Free tercapai. Upgrade ke Premium.');
     if (mode === 'remote') {
-      try {
-        const resp = await resumesApi.save({ id: existingId, title: cvData.title || 'Untitled', data: cvData, plan: user.plan });
-        // refresh list
-        const list = await resumesApi.list();
-        setRemoteResumes(list.resumes || []);
-        return resp.id || existingId;
-      } catch (e) { console.error(e); }
-      return;
+      const resp = await resumesApi.save({ id: existingId, title: cvData.title || 'Untitled', data: cvData, plan: user.plan });
+      await refreshRemoteData({ payments: false, resumes: true });
+      console.debug('saveCV remote success', resp);
+      return resp.id || existingId;
     }
     setUsers(prev => prev.map(u => {
       if (u.id !== user.id) return u;

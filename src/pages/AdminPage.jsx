@@ -47,6 +47,14 @@ export default function AdminPage() {
   };
 
   const userMap = Object.fromEntries(useUsers.map(u => [u.id, u]));
+  const refreshRemote = async () => {
+    if (mode === 'remote' && user?.role === 'admin') {
+      try {
+        const pays = await paymentsApi.list();
+        setRemotePayments(pays.payments || []);
+      } catch {}
+    }
+  };
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-12 space-y-12">
@@ -73,14 +81,17 @@ export default function AdminPage() {
         </div>
       </section>
       <section>
-        <h2 className="text-xl font-semibold mb-4">Verifikasi Pembayaran</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-semibold">Verifikasi Pembayaran</h2>
+          {mode==='remote' && <button onClick={refreshRemote} className="text-sm text-blue-600 underline">Refresh</button>}
+        </div>
         <div className="grid md:grid-cols-2 gap-6">
           {loading && <div className="text-sm text-gray-500">Memuat data pembayaran...</div>}
           {!loading && usePayments.length ? usePayments.map(p => (
             <Card key={p.id}>
-              <p className="text-sm mb-2">User: {userMap[p.userId]?.email}</p>
+              <p className="text-sm mb-2">User: {userMap[p.userId || p.user_id]?.email}</p>
               <p className="text-xs mb-2">Status: <span className="capitalize font-medium">{p.status}</span></p>
-              {(p.proof || p.proofUrl) && <img src={p.proof || p.proofUrl} alt="bukti" className="w-full h-40 object-cover rounded mb-3" />}
+              {(p.proof || p.proofUrl || p.proof_url) && <img src={p.proof || p.proofUrl || p.proof_url} alt="bukti" className="w-full h-40 object-cover rounded mb-3" />}
               <div className="flex gap-2">
                 {p.status === 'pending' && (
                   <>

@@ -2,10 +2,9 @@ import React, { useState } from 'react';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
-import { apiUploadPayment } from '../utils/apiPayments.js';
 
 export default function PaymentPage() {
-  const { submitPayment, user, payments } = useAuth();
+  const { submitPayment, user, payments, mode } = useAuth();
   const [file, setFile] = useState(null);
   const [msg, setMsg] = useState('');
 
@@ -20,29 +19,21 @@ export default function PaymentPage() {
     if (file.size > 5 * 1024 * 1024) { setMsg('Ukuran maksimal 5MB'); return; }
     setLoading(true);
     try {
-      // Cek apakah endpoint serverless tersedia (optional graceful fallback)
-      let usedApi = false;
-      try {
-        await apiUploadPayment({ userId: user.id, amount: 0, file });
-        usedApi = true;
-      } catch {
-        // Fallback ke mekanisme lama (localStorage)
-      }
-      if (!usedApi) {
+      if (mode === 'remote') {
+        await submitPayment(file); // AuthContext akan panggil paymentsApi.upload
+        setMsg('Bukti terkirim (remote). Menunggu verifikasi admin');
+      } else {
         const reader = new FileReader();
         reader.onload = () => {
-          submitPayment(reader.result);
+          submitPayment(reader.result); // local base64
           setMsg('Bukti terkirim (local). Menunggu verifikasi admin');
         };
         reader.readAsDataURL(file);
-      } else {
-        setMsg('Bukti terkirim. Menunggu verifikasi admin');
       }
     } catch (err) {
+      console.error(err);
       setMsg('Upload gagal');
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   return (
@@ -59,6 +50,20 @@ export default function PaymentPage() {
           </form>
         )}
         {msg && <div className="mt-4 text-sm text-primary">{msg}</div>}
+        {mode==='remote' && payments?.length > 0 && (
+          <div className="mt-8 border-t pt-4">
+            <h2 className="text-sm font-semibold mb-2">Debug: Payments (remote)</h2>
+            <ul className="space-y-2 max-h-64 overflow-y-auto text-xs">
+              {payments.slice(0,10).map(p => (
+                <li key={p.id} className="border p-2 rounded">
+                  <div>ID: {p.id}</div>
+                  <div>Status: {p.status}</div>
+                  {(p.proof_url || p.proofUrl) && <a href={p.proof_url || p.proofUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline">Lihat bukti</a>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </Card>
     </div>
   );
