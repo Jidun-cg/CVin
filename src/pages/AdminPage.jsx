@@ -91,7 +91,7 @@ export default function AdminPage() {
             <Card key={p.id}>
               <p className="text-sm mb-2">User: {userMap[p.userId || p.user_id]?.email}</p>
               <p className="text-xs mb-2">Status: <span className="capitalize font-medium">{p.status}</span></p>
-              {(p.proof || p.proofUrl || p.proof_url) && <img src={p.proof || p.proofUrl || p.proof_url} alt="bukti" className="w-full h-40 object-cover rounded mb-3" />}
+              {(p.proof || p.proofUrl || p.proof_url || p.payment_image) && <img src={p.proof || p.proofUrl || p.proof_url || p.payment_image} alt="bukti" className="w-full h-40 object-cover rounded mb-3" />}
               <div className="flex gap-2">
                 {p.status === 'pending' && (
                   <>

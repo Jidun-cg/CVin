@@ -35,7 +35,16 @@ export const paymentsApi = {
   async list() {
     const res = await request('/api/payments-supabase');
     if (!res.ok) throw new Error('List payments gagal');
-    return res.json();
+    const js = await res.json();
+    // Normalisasi field agar frontend lama tetap jalan
+    if (js.payments) {
+      js.payments = js.payments.map(p => ({
+        ...p,
+        proof_url: p.proof_url || p.payment_image,
+        payment_image: p.payment_image || p.proof_url
+      }));
+    }
+    return js;
   },
   async upload(file, { amount = 0, method = 'dana' } = {}) {
     const fd = new FormData();
@@ -44,7 +53,11 @@ export const paymentsApi = {
     fd.append('proof', file);
     const res = await fetch('/api/payments-supabase', { method: 'POST', body: fd, headers: token ? { Authorization: `Bearer ${token}` } : {} });
     if (!res.ok) throw new Error('Upload gagal');
-    return res.json();
+    const js = await res.json();
+    if (js.payment) {
+      js.payment.proof_url = js.payment.proof_url || js.payment.payment_image;
+    }
+    return js;
   },
   async update(id, status) {
     const res = await request('/api/payments-supabase', { method: 'PATCH', body: JSON.stringify({ id, status }) });

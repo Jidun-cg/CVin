@@ -58,7 +58,7 @@ export default function PaymentPage() {
                 <li key={p.id} className="border p-2 rounded">
                   <div>ID: {p.id}</div>
                   <div>Status: {p.status}</div>
-                  {(p.proof_url || p.proofUrl) && <a href={p.proof_url || p.proofUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline">Lihat bukti</a>}
+                  {(p.proof_url || p.proofUrl || p.payment_image) && <a href={p.proof_url || p.proofUrl || p.payment_image} target="_blank" rel="noreferrer" className="text-blue-600 underline">Lihat bukti</a>}
                 </li>
               ))}
             </ul>

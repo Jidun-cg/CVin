@@ -1,24 +1,22 @@
 import { getServerSupabase } from './supabaseClientServer.js';
-import Busboy from 'busboy';
 import jwt from 'jsonwebtoken';
+import { IncomingForm } from 'formidable';
+import fs from 'fs/promises';
 
-export const config = { api: { bodyParser: false } };
-// Pastikan menggunakan Node runtime (Busboy butuh Node APIs)
+// Nonaktifkan bodyParser dan tetapkan size limit < 4MB
+export const config = { api: { bodyParser: false, sizeLimit: '4mb' } };
 export const runtime = 'nodejs';
 
-function parseMultipart(req) {
+const BUCKET = process.env.SUPABASE_BUCKET || 'payments';
+const TABLE = 'user_payments'; // tabel baru sesuai requirement
+
+function parseForm(req) {
   return new Promise((resolve, reject) => {
-    const busboy = Busboy({ headers: req.headers });
-    const fields = {}; const files = {};
-    busboy.on('field', (name, val) => fields[name] = val);
-    busboy.on('file', (name, file, info) => {
-      const chunks = [];
-      file.on('data', d => chunks.push(d));
-      file.on('end', () => { files[name] = { filename: info.filename, mimeType: info.mimeType, buffer: Buffer.concat(chunks) }; });
+    const form = new IncomingForm({ multiples: false, maxFileSize: 4 * 1024 * 1024 });
+    form.parse(req, (err, fields, files) => {
+      if (err) return reject(err);
+      resolve({ fields, files });
     });
-    busboy.on('finish', () => resolve({ fields, files }));
-    busboy.on('error', reject);
-    req.pipe(busboy);
   });
 }
 
@@ -42,66 +40,50 @@ export default async function handler(req, res) {
   if (!user) return respond(res, 401, { error: 'Unauthorized' });
 
   if (req.method === 'GET') {
-    // Admin can see all; normal user sees own
-    let query = supabase.from('payments').select('*').order('created_at', { ascending: false });
-    if (user.role !== 'admin') query = query.eq('user_id', user.id);
-    const { data, error } = await query;
-    if (error) return respond(res, 500, { error: error.message });
-    return respond(res, 200, { payments: data });
+    try {
+      let query = supabase.from(TABLE).select('*').order('created_at', { ascending: false });
+      if (user.role !== 'admin') query = query.eq('user_id', user.id);
+      const { data, error } = await query;
+      if (error) return respond(res, 500, { error: error.message, stage: 'list' });
+      return respond(res, 200, { payments: data });
+    } catch (e) {
+      console.error('[payments-supabase] GET exception', e);
+      return respond(res, 500, { error: 'List failed', stage: 'list-ex' });
+    }
   }
 
   if (req.method === 'POST') {
     try {
-      const { fields, files } = await parseMultipart(req);
-      const file = files.proof;
-      if (!file) return respond(res, 400, { error: 'proof required' });
-      const bucket = process.env.SUPABASE_BUCKET || 'payment-proofs';
-      // Optional: check bucket existence by attempting list (will not throw but may return error)
-      try {
-        const { error: bucketErr } = await supabase.storage.from(bucket).list('', { limit: 1 });
-        if (bucketErr) {
-          console.error('[payments-supabase] Bucket check error:', bucketErr.message);
-          if (bucketErr.message?.toLowerCase().includes('not found')) {
-            // attempt to create bucket (public)
-            try {
-              const { error: createErr } = await supabase.storage.createBucket(bucket, { public: true });
-              if (createErr) {
-                console.error('[payments-supabase] Bucket create failed:', createErr.message);
-                return respond(res, 500, { error: 'Bucket not found and failed to create', bucket, stage: 'bucket-create', creationAttempt: true });
-              } else {
-                console.log('[payments-supabase] Bucket created:', bucket);
-              }
-            } catch (ce) {
-              console.error('[payments-supabase] Bucket create exception:', ce);
-              return respond(res, 500, { error: 'Bucket not found (create exception)', bucket, stage: 'bucket-create-ex', creationAttempt: true });
-            }
-          } else {
-            return respond(res, 500, { error: bucketErr.message, bucket, stage: 'bucket-check' });
-          }
-        }
-      } catch (e) {
-        console.error('[payments-supabase] Bucket list exception:', e);
-        return respond(res, 500, { error: 'Bucket list exception', bucket, stage: 'bucket-list-ex' });
+      const { fields, files } = await parseForm(req);
+      const fileObj = files.proof || files.file || files.image;
+      if (!fileObj) return respond(res, 400, { error: 'proof required', stage: 'no-file' });
+      const single = Array.isArray(fileObj) ? fileObj[0] : fileObj;
+      const filePath = single.filepath || single.file || single.path;
+      const originalName = single.originalFilename || single.newFilename || 'upload.bin';
+      const mimeType = single.mimetype || 'application/octet-stream';
+      const buffer = await fs.readFile(filePath);
+      if (buffer.length > 4 * 1024 * 1024) return respond(res, 400, { error: 'File too large (>4MB)', stage: 'size' });
+
+      // Ensure bucket exists
+      const { error: bucketErr } = await supabase.storage.from(BUCKET).list('', { limit: 1 });
+      if (bucketErr && bucketErr.message?.toLowerCase().includes('not found')) {
+        const { error: createErr } = await supabase.storage.createBucket(BUCKET, { public: true });
+        if (createErr) return respond(res, 500, { error: 'Bucket create failed', stage: 'bucket-create', bucket: BUCKET });
+      } else if (bucketErr) {
+        return respond(res, 500, { error: bucketErr.message, stage: 'bucket-check', bucket: BUCKET });
       }
-      const filename = `${user.id}-${Date.now()}-${file.filename}`;
-      console.log('[payments-supabase] Upload start', { userId: user.id, filename, size: file.buffer.length, mime: file.mimeType, bucket });
-      const { error: upErr } = await supabase.storage.from(bucket).upload(filename, file.buffer, { contentType: file.mimeType });
-      if (upErr) {
-        console.error('[payments-supabase] Upload error:', upErr.message);
-        return respond(res, 500, { error: upErr.message, stage: 'upload' });
-      }
-      const { data: pub } = supabase.storage.from(bucket).getPublicUrl(filename);
-      const insertPayload = { user_id: user.id, amount: fields.amount ? Number(fields.amount) : 0, method: fields.method || 'dana', proof_url: pub.publicUrl };
-      console.log('[payments-supabase] Insert payload', insertPayload);
-      const { data, error } = await supabase.from('payments').insert(insertPayload).select().single();
-      if (error) {
-        console.error('[payments-supabase] Insert error:', error.message);
-        return respond(res, 500, { error: error.message, stage: 'insert' });
-      }
-      console.log('[payments-supabase] Success payment id', data.id);
+
+      const filename = `${user.id}-${Date.now()}-${originalName.replace(/\s+/g,'_')}`;
+      console.log('[payments-supabase] Upload start', { user: user.id, filename, size: buffer.length });
+      const { error: upErr } = await supabase.storage.from(BUCKET).upload(filename, buffer, { contentType: mimeType, upsert: false });
+      if (upErr) return respond(res, 500, { error: upErr.message, stage: 'upload', bucket: BUCKET });
+      const { data: pub } = supabase.storage.from(BUCKET).getPublicUrl(filename);
+      const record = { user_id: user.id, amount: fields.amount ? Number(fields.amount) : 0, method: fields.method || 'dana', payment_image: pub.publicUrl, status: 'pending' };
+      const { data, error } = await supabase.from(TABLE).insert(record).select().single();
+      if (error) return respond(res, 500, { error: error.message, stage: 'insert' });
       return respond(res, 200, { payment: data });
     } catch (e) {
-      console.error('[payments-supabase] Unexpected exception', e);
+      console.error('[payments-supabase] POST exception', e);
       return respond(res, 500, { error: 'Upload failed', stage: 'exception' });
     }
   }
@@ -110,14 +92,11 @@ export default async function handler(req, res) {
     if (user.role !== 'admin') return respond(res, 403, { error: 'Forbidden' });
     const { id, status } = req.body || {};
     if (!id || !status) return respond(res, 400, { error: 'id & status required' });
-    const { error: upErr } = await supabase.from('payments').update({ status }).eq('id', id);
-    if (upErr) return respond(res, 500, { error: upErr.message });
+    const { error: upErr } = await supabase.from(TABLE).update({ status }).eq('id', id);
+    if (upErr) return respond(res, 500, { error: upErr.message, stage: 'update-status' });
     if (status === 'approved') {
-      // fetch payment to get owner
-      const { data: payData, error: payErr } = await supabase.from('payments').select('user_id').eq('id', id).maybeSingle();
-      if (!payErr && payData) {
-        await supabase.from('app_users').update({ plan: 'premium' }).eq('id', payData.user_id);
-      }
+      const { data: payData } = await supabase.from(TABLE).select('user_id').eq('id', id).maybeSingle();
+      if (payData) await supabase.from('app_users').update({ plan: 'premium' }).eq('id', payData.user_id);
     }
     return respond(res, 200, { success: true });
   }
