@@ -67,18 +67,21 @@ export default async function handler(req, res) {
               const { error: createErr } = await supabase.storage.createBucket(bucket, { public: true });
               if (createErr) {
                 console.error('[payments-supabase] Bucket create failed:', createErr.message);
-                return respond(res, 500, { error: 'Bucket not found and failed to create', stage: 'bucket-create' });
+                return respond(res, 500, { error: 'Bucket not found and failed to create', bucket, stage: 'bucket-create', creationAttempt: true });
               } else {
                 console.log('[payments-supabase] Bucket created:', bucket);
               }
             } catch (ce) {
               console.error('[payments-supabase] Bucket create exception:', ce);
-              return respond(res, 500, { error: 'Bucket not found (create exception)', stage: 'bucket-create-ex' });
+              return respond(res, 500, { error: 'Bucket not found (create exception)', bucket, stage: 'bucket-create-ex', creationAttempt: true });
             }
+          } else {
+            return respond(res, 500, { error: bucketErr.message, bucket, stage: 'bucket-check' });
           }
         }
       } catch (e) {
         console.error('[payments-supabase] Bucket list exception:', e);
+        return respond(res, 500, { error: 'Bucket list exception', bucket, stage: 'bucket-list-ex' });
       }
       const filename = `${user.id}-${Date.now()}-${file.filename}`;
       console.log('[payments-supabase] Upload start', { userId: user.id, filename, size: file.buffer.length, mime: file.mimeType, bucket });
