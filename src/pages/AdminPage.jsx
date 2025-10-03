@@ -50,14 +50,26 @@ export default function AdminPage() {
   }, [usePayments]);
 
   const handleApprove = async (id) => {
+    if (!window.confirm('Approve pembayaran ini?')) return;
     if (mode === 'remote') {
-      try { await paymentsApi.update(id, 'approved'); setRemotePayments(prev => prev.map(p => p.id === id ? { ...p, status: 'approved' } : p)); } catch {}
-    } else { updatePaymentStatus(id, 'approved'); }
+      try {
+        await paymentsApi.update(id, 'approved');
+        await refreshRemote();
+      } catch {}
+    } else {
+      updatePaymentStatus(id, 'approved');
+    }
   };
   const handleReject = async (id) => {
+    if (!window.confirm('Tolak pembayaran ini?')) return;
     if (mode === 'remote') {
-      try { await paymentsApi.update(id, 'rejected'); setRemotePayments(prev => prev.map(p => p.id === id ? { ...p, status: 'rejected' } : p)); } catch {}
-    } else { updatePaymentStatus(id, 'rejected'); }
+      try {
+        await paymentsApi.update(id, 'rejected');
+        await refreshRemote();
+      } catch {}
+    } else {
+      updatePaymentStatus(id, 'rejected');
+    }
   };
 
   const userMap = Object.fromEntries(useUsers.map(u => [u.id, u]));
@@ -81,6 +93,7 @@ export default function AdminPage() {
               <p>Total: {useUsers.length}</p>
               <p>Free: {useUsers.filter(u => u.plan === 'free').length}</p>
               <p>Premium: {useUsers.filter(u => u.plan === 'premium').length}</p>
+              <p className="mt-2">Total Pembayaran: {usePayments.length}</p>
             </div>
           </Card>
           <Card className="md:col-span-2">
@@ -101,22 +114,24 @@ export default function AdminPage() {
           <h2 className="text-xl font-semibold">Verifikasi Pembayaran</h2>
           <div className="flex items-center gap-4">
             <div className="flex gap-1 text-xs">
-              <button onClick={()=>setStatusFilter('all')} className={`px-2 py-0.5 rounded ${statusFilter==='all'?'bg-blue-600 text-white':'bg-gray-100 text-gray-600'}`}>All ({usePayments.length})</button>
-              <button onClick={()=>setStatusFilter('pending')} className={`px-2 py-0.5 rounded ${statusFilter==='pending'?'bg-yellow-500 text-white':'bg-gray-100 text-gray-600'}`}>Pending ({totals.pending})</button>
-              <button onClick={()=>setStatusFilter('approved')} className={`px-2 py-0.5 rounded ${statusFilter==='approved'?'bg-green-600 text-white':'bg-gray-100 text-gray-600'}`}>Approved ({totals.approved})</button>
-              <button onClick={()=>setStatusFilter('rejected')} className={`px-2 py-0.5 rounded ${statusFilter==='rejected'?'bg-red-600 text-white':'bg-gray-100 text-gray-600'}`}>Rejected ({totals.rejected})</button>
+              <button onClick={()=>setStatusFilter('all')} disabled={loading} className={`px-2 py-0.5 rounded ${statusFilter==='all'?'bg-blue-600 text-white':'bg-gray-100 text-gray-600'} ${loading?'opacity-50 pointer-events-none':''}`}>All ({usePayments.length})</button>
+              <button onClick={()=>setStatusFilter('pending')} disabled={loading} className={`px-2 py-0.5 rounded ${statusFilter==='pending'?'bg-yellow-500 text-white':'bg-gray-100 text-gray-600'} ${loading?'opacity-50 pointer-events-none':''}`}>Pending ({totals.pending})</button>
+              <button onClick={()=>setStatusFilter('approved')} disabled={loading} className={`px-2 py-0.5 rounded ${statusFilter==='approved'?'bg-green-600 text-white':'bg-gray-100 text-gray-600'} ${loading?'opacity-50 pointer-events-none':''}`}>Approved ({totals.approved})</button>
+              <button onClick={()=>setStatusFilter('rejected')} disabled={loading} className={`px-2 py-0.5 rounded ${statusFilter==='rejected'?'bg-red-600 text-white':'bg-gray-100 text-gray-600'} ${loading?'opacity-50 pointer-events-none':''}`}>Rejected ({totals.rejected})</button>
             </div>
-            {mode==='remote' && <button onClick={refreshRemote} className="text-sm text-blue-600 underline">Refresh</button>}
+            {mode==='remote' && <button onClick={refreshRemote} disabled={loading} className={`text-sm text-blue-600 underline ${loading?'opacity-50 pointer-events-none':''}`}>Refresh</button>}
           </div>
         </div>
+        {err && <div className="mb-4 text-sm text-red-600">{err}</div>}
         <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
           {loading && <div className="text-sm text-gray-500">Memuat data pembayaran...</div>}
           {!loading && filteredPayments.length ? filteredPayments.map(p => {
             const img = p.proof || p.proofUrl || p.proof_url || p.payment_image;
+            const userEmail = userMap[p.userId || p.user_id]?.email;
             return (
               <Card key={p.id}>
                 <div className="flex justify-between items-start mb-2">
-                  <p className="text-xs font-medium truncate max-w-[60%]">{userMap[p.userId || p.user_id]?.email || 'Unknown user'}</p>
+                  <p className="text-xs font-medium truncate max-w-[60%]">{userEmail || <span className="text-red-500">Unknown user</span>}</p>
                   <span className={`text-[10px] px-2 py-0.5 rounded-full capitalize ${p.status==='approved'?'bg-green-100 text-green-700':p.status==='rejected'?'bg-red-100 text-red-600': 'bg-yellow-100 text-yellow-700'}`}>{p.status}</span>
                 </div>
                 {img && <img src={img} alt="bukti" className="w-full h-32 object-cover rounded mb-3" />}
