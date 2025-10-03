@@ -8,21 +8,31 @@ async function ensureAdminUser(supabase) {
   if (process.env.ENABLE_ADMIN_BOOTSTRAP === 'false') return;
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@cvin.id';
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
-  // Check if any admin exists already
-  const { data: existingAdmins, error: adminErr } = await supabase.from('app_users').select('id').eq('role', 'admin').limit(1);
-  if (adminErr) return; // silent fail; won't block auth
-  if (existingAdmins && existingAdmins.length > 0) return; // already have admin
-  // If no admin, check if adminEmail used (maybe user created but not role=admin)
-  const { data: existingEmail } = await supabase.from('app_users').select('*').eq('email', adminEmail).maybeSingle();
+  const forceReset = process.env.ADMIN_FORCE_PASSWORD_RESET === 'true';
   try {
+    // Check if any admin exists already
+    const { data: existingAdmins, error: adminErr } = await supabase.from('app_users').select('id,email').eq('role', 'admin').limit(1);
+    if (adminErr) { console.log('[auth] admin bootstrap: list admins error', adminErr.message); return; }
+    if (existingAdmins && existingAdmins.length > 0 && !forceReset) {
+      return; // already have at least one admin and not forcing reset
+    }
+    const { data: existingEmail, error: emailErr } = await supabase.from('app_users').select('*').eq('email', adminEmail).maybeSingle();
+    if (emailErr) { console.log('[auth] admin bootstrap: fetch email error', emailErr.message); return; }
     if (!existingEmail) {
       const hash = await bcrypt.hash(adminPassword, 10);
       await supabase.from('app_users').insert({ email: adminEmail, password_hash: hash, role: 'admin', plan: 'premium' });
-    } else if (existingEmail.role !== 'admin') {
-      await supabase.from('app_users').update({ role: 'admin', plan: existingEmail.plan || 'premium' }).eq('id', existingEmail.id);
+      console.log('[auth] admin bootstrap: created admin', adminEmail);
+    } else {
+      const update = { role: 'admin' };
+      if (forceReset) {
+        update.password_hash = await bcrypt.hash(adminPassword, 10);
+        console.log('[auth] admin bootstrap: force password reset for', adminEmail);
+      }
+      if (!existingEmail.plan) update.plan = 'premium';
+      await supabase.from('app_users').update(update).eq('id', existingEmail.id);
     }
   } catch (e) {
-    // swallow – admin creation is best-effort
+    console.log('[auth] admin bootstrap exception', e.message);
   }
 }
 
