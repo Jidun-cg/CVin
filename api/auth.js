@@ -40,6 +40,7 @@ export default async function handler(req, res) {
   const supabase = getServerSupabase();
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const secret = process.env.JWT_SECRET || 'dev_secret';
+  const LOG_AUTH = process.env.LOG_AUTH === 'true';
 
   // Best-effort ensure admin exists before processing auth operations
   await ensureAdminUser(supabase);
@@ -58,9 +59,19 @@ export default async function handler(req, res) {
     }
     if (action === 'login') {
       const { data, error } = await supabase.from('app_users').select('*').eq('email', email).maybeSingle();
-      if (error || !data) return res.status(400).json({ error: 'Invalid credentials' });
+      if (error) {
+        if (LOG_AUTH) console.log('[auth] login select error', error.message);
+        return res.status(400).json({ error: 'Invalid credentials' });
+      }
+      if (!data) {
+        if (LOG_AUTH) console.log('[auth] login email not found', email);
+        return res.status(400).json({ error: 'Invalid credentials', code: 'EMAIL_NOT_FOUND' });
+      }
       const ok = await bcrypt.compare(password, data.password_hash);
-      if (!ok) return res.status(400).json({ error: 'Invalid credentials' });
+      if (!ok) {
+        if (LOG_AUTH) console.log('[auth] login password mismatch for', email);
+        return res.status(400).json({ error: 'Invalid credentials', code: 'PASSWORD_MISMATCH' });
+      }
       const token = jwt.sign({ id: data.id, email: data.email, role: data.role }, secret, { expiresIn: '7d' });
       return res.status(200).json({ token, user: { id: data.id, email: data.email, role: data.role, plan: data.plan, exportCount: data.export_count } });
     }
