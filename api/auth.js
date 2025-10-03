@@ -2,10 +2,37 @@ import { getServerSupabase } from './supabaseClientServer.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
+// Ensure a default admin user exists so manual first-time access can work.
+// Controlled by env ENABLE_ADMIN_BOOTSTRAP (default: true). You can override credentials with ADMIN_EMAIL / ADMIN_PASSWORD.
+async function ensureAdminUser(supabase) {
+  if (process.env.ENABLE_ADMIN_BOOTSTRAP === 'false') return;
+  const adminEmail = process.env.ADMIN_EMAIL || 'admin@cvin.id';
+  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+  // Check if any admin exists already
+  const { data: existingAdmins, error: adminErr } = await supabase.from('app_users').select('id').eq('role', 'admin').limit(1);
+  if (adminErr) return; // silent fail; won't block auth
+  if (existingAdmins && existingAdmins.length > 0) return; // already have admin
+  // If no admin, check if adminEmail used (maybe user created but not role=admin)
+  const { data: existingEmail } = await supabase.from('app_users').select('*').eq('email', adminEmail).maybeSingle();
+  try {
+    if (!existingEmail) {
+      const hash = await bcrypt.hash(adminPassword, 10);
+      await supabase.from('app_users').insert({ email: adminEmail, password_hash: hash, role: 'admin', plan: 'premium' });
+    } else if (existingEmail.role !== 'admin') {
+      await supabase.from('app_users').update({ role: 'admin', plan: existingEmail.plan || 'premium' }).eq('id', existingEmail.id);
+    }
+  } catch (e) {
+    // swallow – admin creation is best-effort
+  }
+}
+
 export default async function handler(req, res) {
   const supabase = getServerSupabase();
   if (!supabase) return res.status(503).json({ error: 'Supabase not configured' });
   const secret = process.env.JWT_SECRET || 'dev_secret';
+
+  // Best-effort ensure admin exists before processing auth operations
+  await ensureAdminUser(supabase);
 
   if (req.method === 'POST') {
     const { action, email, password } = req.body || {};
