@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 // Ensure a default admin user exists so manual first-time access can work.
 // Controlled by env ENABLE_ADMIN_BOOTSTRAP (default: true). You can override credentials with ADMIN_EMAIL / ADMIN_PASSWORD.
 async function ensureAdminUser(supabase) {
+  // Run bootstrap unless explicitly disabled with ENABLE_ADMIN_BOOTSTRAP='false'
   if (process.env.ENABLE_ADMIN_BOOTSTRAP === 'false') return;
   const adminEmail = process.env.ADMIN_EMAIL || 'admin@cvin.id';
   const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
