@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -35,6 +35,20 @@ export default function AdminPage() {
   const usePayments = (mode === 'remote' ? remotePayments : null) || payments;
   const useUsers = (mode === 'remote' ? remoteUsers : users);
 
+  // Filters & derived groups
+  const [statusFilter, setStatusFilter] = useState('all');
+  const filteredPayments = useMemo(() => {
+    if (!usePayments) return [];
+    if (statusFilter === 'all') return usePayments;
+    return usePayments.filter(p => p.status === statusFilter);
+  }, [usePayments, statusFilter]);
+
+  const totals = useMemo(() => {
+    const base = { pending: 0, approved: 0, rejected: 0 };
+    usePayments.forEach(p => { base[p.status] = (base[p.status]||0) + 1; });
+    return base;
+  }, [usePayments]);
+
   const handleApprove = async (id) => {
     if (mode === 'remote') {
       try { await paymentsApi.update(id, 'approved'); setRemotePayments(prev => prev.map(p => p.id === id ? { ...p, status: 'approved' } : p)); } catch {}
@@ -63,17 +77,19 @@ export default function AdminPage() {
         <div className="grid md:grid-cols-3 gap-6">
           <Card>
             <h3 className="font-semibold mb-2">Statistik Pengguna</h3>
-            <p className="text-sm text-gray-600">Total: {useUsers.length}</p>
-            <p className="text-sm text-gray-600">Free: {useUsers.filter(u => u.plan === 'free').length}</p>
-            <p className="text-sm text-gray-600">Premium: {useUsers.filter(u => u.plan === 'premium').length}</p>
+            <div className="text-xs space-y-1">
+              <p>Total: {useUsers.length}</p>
+              <p>Free: {useUsers.filter(u => u.plan === 'free').length}</p>
+              <p>Premium: {useUsers.filter(u => u.plan === 'premium').length}</p>
+            </div>
           </Card>
           <Card className="md:col-span-2">
             <h3 className="font-semibold mb-3">Daftar Pengguna</h3>
             <div className="max-h-64 overflow-y-auto text-sm space-y-2 pr-1">
               {useUsers.map(u => (
-                <div key={u.id} className="flex justify-between border-b pb-1">
+                <div key={u.id} className="flex justify-between items-center border-b pb-1">
                   <span>{u.email}</span>
-                  <span className="capitalize {u.plan==='premium'?'text-primary':''}">{u.plan}</span>
+                  <span className={"capitalize text-xs px-2 py-0.5 rounded-full " + (u.plan === 'premium' ? 'bg-primary/10 text-primary' : 'bg-gray-100 text-gray-600')}>{u.plan}</span>
                 </div>
               ))}
             </div>
@@ -83,25 +99,41 @@ export default function AdminPage() {
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">Verifikasi Pembayaran</h2>
-          {mode==='remote' && <button onClick={refreshRemote} className="text-sm text-blue-600 underline">Refresh</button>}
+          <div className="flex items-center gap-4">
+            <div className="flex gap-1 text-xs">
+              <button onClick={()=>setStatusFilter('all')} className={`px-2 py-0.5 rounded ${statusFilter==='all'?'bg-blue-600 text-white':'bg-gray-100 text-gray-600'}`}>All ({usePayments.length})</button>
+              <button onClick={()=>setStatusFilter('pending')} className={`px-2 py-0.5 rounded ${statusFilter==='pending'?'bg-yellow-500 text-white':'bg-gray-100 text-gray-600'}`}>Pending ({totals.pending})</button>
+              <button onClick={()=>setStatusFilter('approved')} className={`px-2 py-0.5 rounded ${statusFilter==='approved'?'bg-green-600 text-white':'bg-gray-100 text-gray-600'}`}>Approved ({totals.approved})</button>
+              <button onClick={()=>setStatusFilter('rejected')} className={`px-2 py-0.5 rounded ${statusFilter==='rejected'?'bg-red-600 text-white':'bg-gray-100 text-gray-600'}`}>Rejected ({totals.rejected})</button>
+            </div>
+            {mode==='remote' && <button onClick={refreshRemote} className="text-sm text-blue-600 underline">Refresh</button>}
+          </div>
         </div>
-        <div className="grid md:grid-cols-2 gap-6">
+        <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
           {loading && <div className="text-sm text-gray-500">Memuat data pembayaran...</div>}
-          {!loading && usePayments.length ? usePayments.map(p => (
-            <Card key={p.id}>
-              <p className="text-sm mb-2">User: {userMap[p.userId || p.user_id]?.email}</p>
-              <p className="text-xs mb-2">Status: <span className="capitalize font-medium">{p.status}</span></p>
-              {(p.proof || p.proofUrl || p.proof_url || p.payment_image) && <img src={p.proof || p.proofUrl || p.proof_url || p.payment_image} alt="bukti" className="w-full h-40 object-cover rounded mb-3" />}
-              <div className="flex gap-2">
+          {!loading && filteredPayments.length ? filteredPayments.map(p => {
+            const img = p.proof || p.proofUrl || p.proof_url || p.payment_image;
+            return (
+              <Card key={p.id}>
+                <div className="flex justify-between items-start mb-2">
+                  <p className="text-xs font-medium truncate max-w-[60%]">{userMap[p.userId || p.user_id]?.email || 'Unknown user'}</p>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full capitalize ${p.status==='approved'?'bg-green-100 text-green-700':p.status==='rejected'?'bg-red-100 text-red-600': 'bg-yellow-100 text-yellow-700'}`}>{p.status}</span>
+                </div>
+                {img && <img src={img} alt="bukti" className="w-full h-32 object-cover rounded mb-3" />}
+                <div className="text-[11px] text-gray-600 space-y-1 mb-3">
+                  {'amount' in p && <p>Amount: <span className="font-medium">{p.amount || 0}</span></p>}
+                  {'method' in p && <p>Method: <span className="font-medium uppercase">{p.method}</span></p>}
+                  {p.created_at && <p>Created: {new Date(p.created_at).toLocaleString()}</p>}
+                </div>
                 {p.status === 'pending' && (
-                  <>
+                  <div className="flex gap-2 text-xs">
                     <Button onClick={() => handleApprove(p.id)} variant="outline">Approve</Button>
                     <Button onClick={() => handleReject(p.id)} variant="subtle">Reject</Button>
-                  </>
+                  </div>
                 )}
-              </div>
-            </Card>
-          )) : !loading && <div>Tidak ada pembayaran.</div>}
+              </Card>
+            );
+          }) : !loading && <div className="col-span-full text-sm text-gray-500">Tidak ada pembayaran.</div>}
         </div>
       </section>
     </div>

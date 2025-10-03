@@ -3,6 +3,10 @@ import { loadJSON, saveJSON } from '../utils/storage.js';
 import { genId } from '../utils/localDb.js';
 import { authApi, paymentsApi, resumesApi, setAuthToken } from '../utils/apiClient.js';
 
+// New flag: in production we generally DON'T want local fallback that can auto-create an admin.
+// Set VITE_ENABLE_LOCAL_FALLBACK=true in .env.local if you still need offline/local mode during development.
+const LOCAL_FALLBACK_ENABLED = import.meta.env.VITE_ENABLE_LOCAL_FALLBACK === 'true';
+
 const AuthContext = createContext(null);
 
 const USERS_KEY = 'cvin_users';
@@ -35,50 +39,67 @@ export function AuthProvider({ children }) {
   };
 
   useEffect(() => {
-    // Detect remote mode if token present in storage
+    // First boot sequence – attempt remote profile if a token exists.
     const token = loadJSON('cvin_token', null);
     if (token) setAuthToken(token);
     (async () => {
-      try {
-        const prof = token ? await authApi.profile() : null;
-        if (prof?.user) { setUser(prof.user); setMode('remote'); }
-      } catch {
-        // fallback to local
+      let remoteEstablished = false;
+      if (token) {
+        try {
+          const prof = await authApi.profile();
+            if (prof?.user) {
+              setUser(prof.user);
+              setMode('remote');
+              remoteEstablished = true;
+              await refreshRemoteData({ payments: true, resumes: true });
+            }
+        } catch (e) {
+          // Invalid/expired token – clear it so we don't appear "logged in" unintentionally.
+          setAuthToken(null);
+          saveJSON('cvin_token', null);
+        }
       }
-      if (mode === 'local') {
-        let legacyUsers = loadJSON(USERS_KEY, []);
-        if (!legacyUsers.find(x => x.role === 'admin')) {
-          legacyUsers.push({ id: 'admin-user', email: 'admin@cvin.id', password: 'admin123', role: 'admin', plan: 'premium', cvs: [], exportCount: 0 });
+
+      if (!remoteEstablished) {
+        // Only enable local fallback if explicitly allowed via env flag.
+        if (LOCAL_FALLBACK_ENABLED) {
+          let legacyUsers = loadJSON(USERS_KEY, []);
+          // Create a dev admin only in fallback mode (NOT production) and only if not exists.
+          if (!legacyUsers.find(x => x.role === 'admin')) {
+            legacyUsers.push({ id: 'admin-user', email: 'admin@cvin.id', password: 'admin123', role: 'admin', plan: 'premium', cvs: [], exportCount: 0 });
+          }
+          setUsers(legacyUsers);
+          setPayments(loadJSON(PAYMENTS_KEY, []));
+          const session = loadJSON(SESSION_KEY, null);
+          if (session) {
+            const found = legacyUsers.find(u => u.id === session.id);
+            if (found) setUser(found);
+          }
+        } else {
+          // Ensure we explicitly are in a logged-out state (no silent auto-login).
+          setMode('remote'); // Keep remote mode so signup/login hits backend; user remains null.
         }
-        setUsers(legacyUsers);
-        setPayments(loadJSON(PAYMENTS_KEY, []));
-        const session = loadJSON(SESSION_KEY, null);
-        if (session) {
-          const found = legacyUsers.find(u => u.id === session.id);
-          if (found) setUser(found);
-        }
-      } else {
-        // fetch initial resumes list so user sees existing data
-        await refreshRemoteData({ payments: true, resumes: true });
       }
     })();
-  }, [mode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once at mount
 
   useEffect(() => { if (mode === 'local') saveJSON(USERS_KEY, users); }, [users, mode]);
   useEffect(() => { if (mode === 'local') saveJSON(PAYMENTS_KEY, payments); }, [payments, mode]);
   useEffect(() => { if (mode === 'local') saveJSON(SESSION_KEY, user); }, [user, mode]);
 
   const signup = async (email, password) => {
-    // Always try remote first; fallback to local if unreachable or misconfigured
+    // Remote-first. Only fallback locally if explicitly enabled.
     try {
       const { token, user: remoteUser } = await authApi.signup(email, password);
       setAuthToken(token); saveJSON('cvin_token', token);
       setUser(remoteUser); setMode('remote');
-        await refreshRemoteData();
+      await refreshRemoteData();
       return;
     } catch (e) {
-      // console.warn('Remote signup failed, fallback to local', e);
+      if (!LOCAL_FALLBACK_ENABLED) throw new Error('Signup gagal (remote)');
     }
+    if (!LOCAL_FALLBACK_ENABLED) return; // safety
     if (users.find(u => u.email === email)) throw new Error('Email sudah terdaftar (local)');
     const newUser = { id: genId('u'), email, password, role: 'user', plan: 'free', cvs: [], exportCount: 0 };
     setUsers(prev => [...prev, newUser]);
@@ -86,7 +107,6 @@ export function AuthProvider({ children }) {
   };
 
   const login = async (email, password) => {
-    // Try remote first even if currently in local mode
     try {
       const { token, user: remoteUser } = await authApi.login(email, password);
       setAuthToken(token); saveJSON('cvin_token', token);
@@ -94,14 +114,20 @@ export function AuthProvider({ children }) {
       await refreshRemoteData();
       return;
     } catch (e) {
-      // ignore and fallback
+      if (!LOCAL_FALLBACK_ENABLED) throw new Error('Email atau password salah / login gagal');
     }
+    if (!LOCAL_FALLBACK_ENABLED) return;
     const found = users.find(u => u.email === email && u.password === password);
     if (!found) throw new Error('Email atau password salah (local)');
     setUser(found);
   };
 
-  const logout = () => { setUser(null); setAuthToken(null); saveJSON('cvin_token', null); };
+  const logout = () => {
+    setUser(null);
+    setAuthToken(null);
+    saveJSON('cvin_token', null);
+    if (LOCAL_FALLBACK_ENABLED) saveJSON(SESSION_KEY, null);
+  };
 
   const submitPayment = async (proofFileOrDataUrl) => {
     if (!user) return;
