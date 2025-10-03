@@ -5,17 +5,25 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { Link } from 'react-router-dom';
 
 export default function DashboardPage() {
-  const { user, duplicateCV, saveCV } = useAuth();
+  const { user, duplicateCV, saveCV, mode, canCreateCV } = useAuth();
   const [info, setInfo] = useState('');
   const [selectedCV, setSelectedCV] = useState(null);
 
   if (!user) return null;
 
-  // Hapus CV
+  // Determine list of CVs (local mode uses user.cvs; remote mode will rely on refreshRemoteData logic saving through saveCV which refetches)
+  const cvs = user?.cvs || [];
+
   const handleDelete = (cvId) => {
     if (!window.confirm('Yakin hapus CV ini?')) return;
-    const newCVs = user.cvs.filter(c => c.id !== cvId);
-    saveCV({ cvs: newCVs }, user.id); // Overwrite cvs array
+    if (!cvs.length) return;
+    // Local-only deletion for now; remote deletion endpoint belum ada.
+    if (mode === 'remote') {
+      alert('Fitur hapus CV remote belum tersedia.');
+      return;
+    }
+    const newCVs = cvs.filter(c => c.id !== cvId);
+    saveCV({ cvs: newCVs }, user.id); // Overwrite cvs array locally
     setInfo('CV dihapus');
     setTimeout(()=>setInfo(''),2000);
   };
@@ -31,13 +39,13 @@ export default function DashboardPage() {
             <Link to="/payment" className="inline-block mt-1 text-primary text-sm hover:underline">Upgrade ke Premium →</Link>
           </>}
         </div>
-        <Link to="/generator"><Button>Buat CV Baru</Button></Link>
+        <Link to="/generator"><Button disabled={!canCreateCV()}>{canCreateCV() ? 'Buat CV Baru' : 'Limit Tercapai'}</Button></Link>
       </div>
 
       {info && <div className="mb-4 text-sm text-primary">{info}</div>}
 
       <div className="grid md:grid-cols-3 gap-6">
-        {user.cvs?.length ? user.cvs.map(cv => (
+        {cvs.length ? cvs.map(cv => (
           <Card key={cv.id} className="flex flex-col h-full">
             <div className="mb-2">
               <h3 className="font-semibold mb-1 truncate">{cv.title || 'CV Tanpa Judul'}</h3>
