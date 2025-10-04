@@ -129,13 +129,13 @@ export function AuthProvider({ children }) {
     if (LOCAL_FALLBACK_ENABLED) saveJSON(SESSION_KEY, null);
   };
 
-  const submitPayment = async (proofFileOrDataUrl) => {
+  const submitPayment = async (proofFileOrDataUrl, opts = {}) => {
     if (!user) return;
     if (mode === 'remote') {
       // expects File object
       if (proofFileOrDataUrl instanceof File) {
         try {
-          const { payment } = await paymentsApi.upload(proofFileOrDataUrl);
+          const { payment } = await paymentsApi.upload(proofFileOrDataUrl, opts);
           // Update list immediately
           setRemotePayments(prev => [payment, ...(prev||[])]);
           // ensure we have fresh list (in case server side transforms)
@@ -164,9 +164,11 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const isPremium = () => user && typeof user.plan === 'string' && user.plan.startsWith('premium');
+
   const canCreateCV = () => {
     if (!user) return false;
-    if (user.plan === 'premium') return true;
+    if (isPremium()) return true;
     if (mode === 'remote') {
       const count = remoteResumes?.length || 0;
       return count < 1;
@@ -207,7 +209,7 @@ export function AuthProvider({ children }) {
 
   const canExport = (format) => {
     if (!user) return false;
-    if (user.plan === 'premium') return true;
+    if (isPremium()) return true;
     if (format === 'docx') return false;
     return (user.exportCount || 0) < 3;
   };
@@ -235,6 +237,7 @@ export function AuthProvider({ children }) {
     saveCV,
     duplicateCV,
     canCreateCV,
+    isPremium,
     canExport,
     incrementExport
   };
