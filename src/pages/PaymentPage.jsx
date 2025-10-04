@@ -2,13 +2,14 @@ import React, { useState } from 'react';
 import Card from '../components/Card.jsx';
 import Button from '../components/Button.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
+import paymentQRIS from '../components/paymentQRIS.jpg';
 
 export default function PaymentPage() {
   const { submitPayment, user, payments, mode, isPremium } = useAuth();
   const [file, setFile] = useState(null);
   const [msg, setMsg] = useState('');
   const [plan, setPlan] = useState('monthly'); // 'monthly' | 'lifetime'
-  const [method, setMethod] = useState('dana');
+  const [method, setMethod] = useState('qris');
 
   if (!user) return null;
 
@@ -43,7 +44,10 @@ export default function PaymentPage() {
     <div className="max-w-xl mx-auto px-4 py-12">
       <Card>
         <h1 className="text-xl font-semibold mb-4">Upgrade ke Premium</h1>
-        <p className="text-sm text-gray-600 mb-4">Lakukan pembayaran manual via Dana ke nomor: <span className="font-medium">087861260156</span> a.n. <span className="font-medium">CVin Digital</span>. Setelah transfer, pilih paket lalu upload bukti untuk diverifikasi.</p>
+        <p className="text-sm text-gray-600 mb-4">Silakan lakukan pembayaran dengan memindai QRIS berikut. Setelah bayar, pilih paket dan upload bukti untuk verifikasi.</p>
+        <div className="mb-4">
+          <img src={paymentQRIS} alt="QRIS Pembayaran" className="w-full max-w-sm mx-auto rounded shadow" />
+        </div>
         {isPremium() && <div className="text-green-600 text-sm mb-4">Anda sudah Premium.</div>}
         {userPayment && <div className="text-sm text-amber-600 mb-4">Pembayaran menunggu verifikasi admin.</div>}
         {!userPayment && !isPremium() && (
@@ -58,15 +62,7 @@ export default function PaymentPage() {
                 <span className="ml-1">Premium Lifetime (Rp 50.000)</span>
               </label>
             </div>
-            <div className="text-sm">
-              <label>Metode:</label>
-              <select className="ml-2 border rounded px-2 py-1" value={method} onChange={e=>setMethod(e.target.value)}>
-                <option value="dana">DANA</option>
-                <option value="gopay">GoPay</option>
-                <option value="ovo">OVO</option>
-                <option value="bank">Bank Transfer</option>
-              </select>
-            </div>
+            {/* Metode diset default ke QRIS */}
             <input type="file" accept="image/png,image/jpeg" onChange={e => setFile(e.target.files[0])} />
             <Button disabled={loading}>{loading ? 'Mengunggah...' : 'Upload Bukti'}</Button>
           </form>
